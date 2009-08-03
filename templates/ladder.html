@@ -1,0 +1,42 @@
+<script type="text/javascript" src="http://www.google.com/jsapi"></script>
+<script type="text/javascript">
+google.load('visualization', '1', {packages: ['table']});
+var json_table;
+var json_data;
+
+function selectHandler()
+{
+    var selection = json_table.getSelection();
+    var item = selection[0];
+    var message = '{row:' + item.row + ',column:' + item.column + '} ' + json_data.getValue(item.row, 1) + '\n';
+
+    window.location.href = "/fifadev/user?id=" + json_data.getValue(item.row, 1);
+}
+
+var options = {'showRowNumber': false, 'allowHtml':true}; //, 'width': "100%"};
+function drawVisualization()
+{
+  json_table = new google.visualization.Table(document.getElementById('table_div_json'));
+  json_data = new google.visualization.DataTable( {{ json }} );
+  //json_data.setProperty(0, 0, "style", "width: 100px;");
+  json_table.draw(json_data, options);
+
+  google.visualization.events.addListener(json_table, 'select', selectHandler);
+}
+
+google.setOnLoadCallback(drawVisualization);
+</script>
+<a href="/{{ ladder_name }}/report">Report Match</a>
+<a href="/{{ ladder_name }}/account">My Account</a>
+<h1 id="header">{{ ladder_name }} Ladder</h1>
+<div id="table_div_json"></div>
+</br>
+<h2>Latest Games</h2>
+<div id="latest_games">
+{% for game in games %}
+  <b>{{ game.winner }} {{ game.winner_score }} - {{ game.loser_score }} {{ game.loser }}</b></br>
+  date: {{ game.date|date:"F j, Y, P T" }}</br>
+  winner: {{ game.winner }}</br>
+  </br>
+{% endfor %}
+</div>

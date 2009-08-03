@@ -1,0 +1,48 @@
+<script>
+function checkScore(score, errorMsg)
+{
+	var error = "";
+	var intScore = parseInt(score)
+	if (intScore < 0 || isNaN(intScore))
+	{
+		error = errorMsg;
+	}
+	return error;
+}
+
+function checkWholeForm(theForm)
+{
+    var why = "";
+	why += checkScore(theForm.player_score.value,"Invalid player score entered!\n");
+	why += checkScore(theForm.opponent_score.value, "Invalid opponent score entered!\n");
+    if (why != "")
+    {
+       alert(why);
+       return false;
+    }
+	return true;
+}
+</script>
+<a href="/{{ ladder_name }}/">Ladder</a>
+<a href="/{{ ladder_name }}/account">My Account</a>
+<h1 id="header">Report Match</h1>
+<form action="/{{ ladder_name }}/report" method="post" onSubmit="return checkWholeForm(this);">
+    <label class="create">Player:</label>{{ user.nickname }}</br>
+    <label for="player_score" class="create">Player Score:</label><input type="text" name="player_score"/></br>
+    <label class="create">Opponent:</label>
+    <select name="opponent">
+        {% for user in opponents %}
+        <option value='{{ user.user.email }}'>
+		{% if user.nickname %}
+			{{ user.nickname }} ({{ user.user.nickname }})
+		{% else %}
+			{{ user.user.nickname }}
+		{% endif %}
+		</option>
+        {% endfor %}
+    </select></br>
+    <label for="opponent_score" class="create">Opponent Score:</label><input type="text" name="opponent_score"/></br>
+    <label class="create">Player Result:</label><input type="radio" name="win" value="win"/>Win
+    <input type="radio" name="win" value="loss" checked="checked"/>Loss<br/>
+    <div><input type="submit" value="Submit"></div>
+</form>

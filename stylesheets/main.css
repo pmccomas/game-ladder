@@ -1,0 +1,42 @@
+body {
+  margin: 5px 5px;
+  padding: 0 5px;
+  font-family: Arial, sans-serif;
+  font-size: 87%;
+}
+#header {
+  padding: 8px;
+  background:#e5ecf9;
+}
+#main {
+  float: left;
+  width: 68%;
+  padding-left: 5px;
+}
+#nav {
+  text-align: right;
+  margin: 0 0 5px;
+}
+#nav a {
+  margin: 0 7px 0 0;
+}
+h1,
+#scopes h4,
+#tokens h4 {
+  margin-top: 2;
+}
+#header,
+#scopes,
+#tokens {
+  -moz-border-radius: 5px;
+}
+label.create {
+  display: inline-block;
+  text-align:right;
+  width: 40%;
+  margin-right: 5px;
+}
+#latest_games {
+    font-size: 8pt;
+    font-family:verdana,sans-serif;
+}

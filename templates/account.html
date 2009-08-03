@@ -1,0 +1,8 @@
+<a href="/{{ ladder_name }}/">Ladder</a>
+<a href="/{{ ladder_name }}/report">Report Match</a>
+<h1 id="header">My Account</h1>
+<form action="/{{ ladder_name }}/account" method="post">
+    <label class="create">Email:</label>{{ user.user.email }}</br>
+    <label class="create">Nickname:</label><input type="text" name="nickname" value="{{ user.nickname }}"/></br>
+    <div><input type="submit" value="Update"></div>
+</form>

@@ -1,0 +1,21 @@
+application: game-ladder
+version: 1
+runtime: python
+api_version: 1
+
+handlers:
+- url: /stylesheets
+  static_dir: stylesheets
+
+- url: /
+  script: game-ladder.py
+
+- url: /[A-Za-z0-9]+[/]?
+  script: game-ladder.py
+
+- url: /[A-Za-z0-9]+/user
+  script: game-ladder.py
+
+- url: /[A-Za-z0-9]+/.*
+  script: game-ladder.py
+  login: required

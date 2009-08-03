@@ -1,0 +1,37 @@
+<script type="text/javascript" src="http://www.google.com/jsapi"></script>
+<script type="text/javascript">
+google.load('visualization', '1', {packages: ['piechart']});
+
+function drawVisualization()
+{
+  json_pie = new google.visualization.PieChart(document.getElementById('piechart_div_json'));
+  json_data = new google.visualization.DataTable( {{ json }} );
+  json_pie.draw(json_data, {width: 400, height:240, is3D: true, title: 'Win / Loss Record'});
+}
+
+google.setOnLoadCallback(drawVisualization);
+
+</script>
+<a href="/{{ ladder_name }}/">Ladder</a>
+<a href="/{{ ladder_name }}/report">Report Match</a>
+<a href="/{{ ladder_name }}/account">My Account</a>
+<h1 id="header">
+	{% if userRecord.nickname %}
+		{{ userRecord.nickname }} ({{ userRecord.user.nickname }})
+	{% else %}
+		{{ userRecord.user.nickname }}
+	{% endif %}
+	Profile</h1>
+Email:{{ userRecord.user.email }}</br>
+Nickname:{{ userRecord.nickname }}</br>
+<div id="piechart_div_json"></div>
+<h2>Latest Games</h2>
+<div id="latest_games">
+{% for game in games %}
+  <b>{{ game.winner }} {{ game.winner_score }} - {{ game.loser_score }} {{ game.loser }}</b></br>
+  date: {{ game.date|date:"F j, Y, P T" }}</br>
+  winner: {{ game.winner }}</br>
+  </br>
+{% endfor %}
+</div>
+
