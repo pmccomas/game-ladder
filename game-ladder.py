@@ -2,6 +2,7 @@ import cgi
 import os
 import gviz_api
 import math
+import logging
 
 from google.appengine.ext.webapp import template
 from google.appengine.api import users
@@ -33,6 +34,11 @@ def GetCurrentLadder(self):
     return self.request.path
 
 # ------------------- db Models ----------------------------------------------------------------------------------
+class CommentRecord(db.Model):
+    user = db.UserProperty()
+    date = db.DateTimeProperty(auto_now_add=True)
+    text = db.StringProperty()
+
 class GameRecord(db.Model):
     ladder = db.StringProperty()
     winner = db.UserProperty()
@@ -40,12 +46,18 @@ class GameRecord(db.Model):
     date = db.DateTimeProperty(auto_now_add=True)
     winner_score = db.IntegerProperty()
     loser_score = db.IntegerProperty()
+    comments = db.ListProperty(db.Key)
+
+    def get_comments(self):
+        return [ db.get( comment ) for comment in self.comments ]
+
 
 class UserRecord(db.Model):
     ladder = db.StringProperty()
     user = db.UserProperty()
     nickname = db.StringProperty()
     rating = db.IntegerProperty()
+    ratingChange = db.IntegerProperty()
 
 class LadderRecord(db.Model):
     ladder = db.StringProperty()
@@ -106,8 +118,11 @@ def CalcMatchWeight(goalDifference):
 
 def CalcRatingChange(playerRating, opponentRating, result, goalDifference):
     matchWeight = CalcMatchWeight(goalDifference)
-    resultDiff = result - CalcExpectedResult(playerRating, opponentRating)
+    expectedResult = CalcExpectedResult(playerRating, opponentRating)
+    resultDiff = result - expectedResult
     ratingChange = resultDiff * matchWeight
+    logging.debug("Rating Calc Input: pr:%d or:%d result:%.2f, gd:%d", playerRating, opponentRating, result, goalDifference)
+    logging.debug("Rating Calc Output: mw:%.2f er:%.2f rc:%.2f", matchWeight, expectedResult, ratingChange)
     return ratingChange
 
 # recalculate the rating score for all players from the beginning
@@ -128,12 +143,16 @@ def RecalcRatingScores():
         winner = GetUserRecord( game.winner );
         loser = GetUserRecord( game.loser );
 
+        logging.debug("Rating Calc: winner:%s loser:%s", game.winner, game.loser)
         winnerRatingChange = CalcRatingChange(winner.rating, loser.rating, 1.0, game.winner_score - game.loser_score)
-        winner.rating += int(winnerRatingChange)
+        loserRatingChange = CalcRatingChange(loser.rating, winner.rating, 0.0, game.loser_score - game.winner_score)
+
+        winner.ratingChange = int(winnerRatingChange)
+        winner.rating += winner.ratingChange
         winner.put()
 
-        loserRatingChange = CalcRatingChange(loser.rating, winner.rating, 0.0, game.loser_score - game.winner_score)
-        loser.rating += int(loserRatingChange)
+        loser.ratingChange = int(loserRatingChange)
+        loser.rating += loser.ratingChange
         loser.put()
 
 # ------------------- Request Handlers ----------------------------------------------------------------------------------
@@ -208,9 +227,6 @@ class Ladder(BasePage):
         ladderRecord.put()
 
     def get(self):
-        gameRecord_query = GameRecord.all().filter("ladder =", ladder_name).order('-date')
-        games = gameRecord_query.fetch(10)
-
         # create current user if he exists
         if users.get_current_user():
             self.CreateDefaultUser()
@@ -218,6 +234,8 @@ class Ladder(BasePage):
         # update ladder with all users and get it
         self.RefreshLadderWithAllUsers()
         ladderRecord = LadderRecord.all().filter("ladder =", ladder_name).get()
+
+        #RecalcRatingScores()
 
         # get all the users
         userRecords = UserRecord.all().filter("ladder =", ladder_name).order('-rating').fetch(1000)
@@ -227,9 +245,11 @@ class Ladder(BasePage):
                      "rank": ("number", "Rank"),
                      "wins": ("number", "Wins"),
                      "losses": ("number", "Losses"),
+                     "gp": ("number", "Total"),
                      "gf": ("number", "Goals For"),
                      "ga": ("number", "Goals Against"),
-                     "rating": ("number", "Rating")}
+                     "rating": ("number", "Rating"),
+                     "+-": ("number", "+/-")}
         data = []
 
         for index, userRecord in enumerate(userRecords):
@@ -240,9 +260,11 @@ class Ladder(BasePage):
                           "rank": index + 1,
                           "wins": stats.wins,
                           "losses": stats.losses,
+                          "gp": stats.wins + stats.losses,
                           "gf": stats.goalsfor,
                           "ga": stats.goalsagainst,
-                          "rating" : userRecord.rating
+                          "rating" : userRecord.rating,
+                          "+-": userRecord.ratingChange
                           })
 
         # Loading it into gviz_api.DataTable
@@ -250,8 +272,11 @@ class Ladder(BasePage):
         data_table.LoadData(data)
 
         # Creating a JavaScript code string
-        json = data_table.ToJSon(columns_order=("rank", "rating", "name", "wins", "losses", "gf", "ga"),
+        json = data_table.ToJSon(columns_order=("rank", "rating", "name", "+-", "wins", "losses", "gp", "gf", "ga"),
                                    order_by="rank")
+
+        gameRecord_query = GameRecord.all().filter("ladder =", ladder_name).order('-date')
+        games = gameRecord_query.fetch(10)
 
         template_values = {
             'ladder_name' : ladder_name,
@@ -381,6 +406,16 @@ class Report(BasePage):
         if game.winner == game.loser:
             self.redirect('/%s/' % (ladder_name))
 
+        commentText = self.request.get('comment');
+        if commentText:
+            comment = CommentRecord()
+            comment.text = commentText
+            comment.user = users.get_current_user()
+            comment.put()
+
+            game.comments.append( comment.key() )
+
+
         game.put()
 
         # update ladder with game record
@@ -405,7 +440,8 @@ application = webapp.WSGIApplication(
                                      debug=True)
 
 def main():
-  run_wsgi_app(application)
+    #logging.getLogger().setLevel(logging.DEBUG)
+    run_wsgi_app(application)
 
 if __name__ == "__main__":
   main()

@@ -30,6 +30,7 @@ h1,
 #tokens {
   -moz-border-radius: 5px;
 }
+
 label.create {
   display: inline-block;
   text-align:right;
@@ -39,4 +40,8 @@ label.create {
 #latest_games {
     font-size: 8pt;
     font-family:verdana,sans-serif;
+}
+#game_comments {
+  padding-left: 20px;
+  font-size: 10pt;
 }

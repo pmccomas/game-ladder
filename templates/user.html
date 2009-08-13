@@ -31,7 +31,17 @@ Nickname:{{ userRecord.nickname }}</br>
   <b>{{ game.winner }} {{ game.winner_score }} - {{ game.loser_score }} {{ game.loser }}</b></br>
   date: {{ game.date|date:"F j, Y, P T" }}</br>
   winner: {{ game.winner }}</br>
+  {% if game.comments %}
+      comments:</br>
+      <div id="game_comments">
+      {% for comment in game.get_comments %}
+         {{ comment.text }}</br>
+      {% endfor %}
+      </div>
+  {% endif %}
   </br>
 {% endfor %}
+
+
 </div>
 
