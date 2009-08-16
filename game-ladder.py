@@ -37,12 +37,13 @@ def GetCurrentLadder(self):
 class CommentRecord(db.Model):
     user = db.UserProperty()
     date = db.DateTimeProperty(auto_now_add=True)
-    text = db.StringProperty()
+    text = db.StringProperty(multiline=True)
 
 class GameRecord(db.Model):
     ladder = db.StringProperty()
     winner = db.UserProperty()
     loser = db.UserProperty()
+    tie = db.BooleanProperty()
     date = db.DateTimeProperty(auto_now_add=True)
     winner_score = db.IntegerProperty()
     loser_score = db.IntegerProperty()
@@ -50,7 +51,6 @@ class GameRecord(db.Model):
 
     def get_comments(self):
         return [ db.get( comment ) for comment in self.comments ]
-
 
 class UserRecord(db.Model):
     ladder = db.StringProperty()
@@ -61,20 +61,7 @@ class UserRecord(db.Model):
 
 class LadderRecord(db.Model):
     ladder = db.StringProperty()
-    ranks = db.ListProperty(users.User)
     date = db.DateTimeProperty(auto_now_add=True)
-
-    def UpdateLadder(self, gameRecord):
-        winnerIndex = self.ranks.index( gameRecord.winner )
-        loserIndex = self.ranks.index( gameRecord.loser )
-        # no change if winner was already better
-        if winnerIndex < loserIndex:
-            return
-
-        newIndex = int(math.floor( (winnerIndex - loserIndex) * win_ladder_move_percent )) + loserIndex
-        del self.ranks[ winnerIndex ]
-        self.ranks.insert(newIndex, gameRecord.winner )
-        self.put()
 
 # ------------------- Helper classes ----------------------------------------------------------------------------------
 # get player wins/losses by reading game records
@@ -82,8 +69,13 @@ class UserStats:
     def __init__(self, user):
         winQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", user)
         loseQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", user)
-        self.wins = winQuery.count()
-        self.losses = loseQuery.count()
+        winTiesQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", user).filter("tie =", True)
+        loseTiesQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", user).filter("tie =", True)
+        winTies = winTiesQuery.count()
+        loseTies = loseTiesQuery.count()
+        self.wins = winQuery.count() - winTies
+        self.losses = loseQuery.count() - loseTies
+        self.ties = winTies + loseTies
         self.goalsfor = 0
         self.goalsagainst = 0
         for game in winQuery.fetch(1000):
@@ -121,12 +113,14 @@ def CalcRatingChange(playerRating, opponentRating, result, goalDifference):
     expectedResult = CalcExpectedResult(playerRating, opponentRating)
     resultDiff = result - expectedResult
     ratingChange = resultDiff * matchWeight
-    logging.debug("Rating Calc Input: pr:%d or:%d result:%.2f, gd:%d", playerRating, opponentRating, result, goalDifference)
-    logging.debug("Rating Calc Output: mw:%.2f er:%.2f rc:%.2f", matchWeight, expectedResult, ratingChange)
+    #logging.debug("Rating Calc Input: pr:%d or:%d result:%.2f, gd:%d", playerRating, opponentRating, result, goalDifference)
+    #logging.debug("Rating Calc Output: mw:%.2f er:%.2f rc:%.2f", matchWeight, expectedResult, ratingChange)
     return ratingChange
 
 # recalculate the rating score for all players from the beginning
 def RecalcRatingScores():
+    logging.debug("Recalculating all ratings scores")
+
     # get games oldest first
     gameRecord_query = GameRecord.all().filter("ladder =", ladder_name).order('date')
     games = gameRecord_query.fetch(1000)
@@ -135,7 +129,7 @@ def RecalcRatingScores():
     userRecord_query = UserRecord.all().filter("ladder =", ladder_name)
     userRecords = userRecord_query.fetch(1000)
     for userRecord in userRecords:
-        userRecord.rating = ELO_DEFAULT_RATING
+        userRecord.rating = 0
         userRecord.put()
 
     # update rating for each game
@@ -143,9 +137,14 @@ def RecalcRatingScores():
         winner = GetUserRecord( game.winner );
         loser = GetUserRecord( game.loser );
 
-        logging.debug("Rating Calc: winner:%s loser:%s", game.winner, game.loser)
-        winnerRatingChange = CalcRatingChange(winner.rating, loser.rating, 1.0, game.winner_score - game.loser_score)
-        loserRatingChange = CalcRatingChange(loser.rating, winner.rating, 0.0, game.loser_score - game.winner_score)
+        if winner.rating == 0:
+            winner.rating = ELO_DEFAULT_RATING
+        if loser.rating == 0:
+            loser.rating = ELO_DEFAULT_RATING
+
+        #logging.debug("Rating Calc: winner:%s loser:%s", game.winner, game.loser)
+        winnerRatingChange = CalcRatingChange(winner.rating, loser.rating, 1.0 if not game.tie else 0.5, game.winner_score - game.loser_score)
+        loserRatingChange = CalcRatingChange(loser.rating, winner.rating, 0.0 if not game.tie else 0.5, game.loser_score - game.winner_score)
 
         winner.ratingChange = int(winnerRatingChange)
         winner.rating += winner.ratingChange
@@ -212,28 +211,24 @@ class Ladder(BasePage):
         userRecord.ladder = ladder_name
         userRecord.put()
 
-    def RefreshLadderWithAllUsers(self):
+    def CreateLadder(self):
         userRecords = UserRecord.all().filter("ladder =", ladder_name).fetch(1000)
 
         ladderRecord = LadderRecord.all().filter("ladder =", ladder_name).get()
         if ladderRecord == None:
             ladderRecord = LadderRecord()
             ladderRecord.ladder = ladder_name
+            ladderRecord.put()
 
-        for user in userRecords:
-            if user.user not in ladderRecord.ranks:
-                ladderRecord.ranks.append( user.user )
-
-        ladderRecord.put()
+        return ladderRecord
 
     def get(self):
         # create current user if he exists
         if users.get_current_user():
             self.CreateDefaultUser()
 
-        # update ladder with all users and get it
-        self.RefreshLadderWithAllUsers()
-        ladderRecord = LadderRecord.all().filter("ladder =", ladder_name).get()
+        # create a ladder if one doesn't exist
+        self.CreateLadder()
 
         #RecalcRatingScores()
 
@@ -245,6 +240,7 @@ class Ladder(BasePage):
                      "rank": ("number", "Rank"),
                      "wins": ("number", "Wins"),
                      "losses": ("number", "Losses"),
+                     "ties": ("number", "Ties"),
                      "gp": ("number", "Total"),
                      "gf": ("number", "Goals For"),
                      "ga": ("number", "Goals Against"),
@@ -260,7 +256,8 @@ class Ladder(BasePage):
                           "rank": index + 1,
                           "wins": stats.wins,
                           "losses": stats.losses,
-                          "gp": stats.wins + stats.losses,
+                          "ties": stats.ties,
+                          "gp": stats.wins + stats.losses + stats.ties,
                           "gf": stats.goalsfor,
                           "ga": stats.goalsagainst,
                           "rating" : userRecord.rating,
@@ -272,7 +269,7 @@ class Ladder(BasePage):
         data_table.LoadData(data)
 
         # Creating a JavaScript code string
-        json = data_table.ToJSon(columns_order=("rank", "rating", "name", "+-", "wins", "losses", "gp", "gf", "ga"),
+        json = data_table.ToJSon(columns_order=("rank", "rating", "name", "+-", "wins", "losses", "ties", "gp", "gf", "ga"),
                                    order_by="rank")
 
         gameRecord_query = GameRecord.all().filter("ladder =", ladder_name).order('-date')
@@ -293,6 +290,13 @@ class Ladder(BasePage):
 
         self.write_page_footer()
 
+class Resimulate(BasePage):
+    def post(self):
+        RecalcRatingScores()
+
+        self.redirect('/%s/' % (ladder_name))
+
+
 class Account(BasePage):
     title = 'My Account'
 
@@ -303,7 +307,8 @@ class Account(BasePage):
 
         template_values = {
             'ladder_name' : ladder_name,
-            'user': user
+            'user': user,
+            'isAdmin': users.is_current_user_admin()
         }
 
         self.write_page_header()
@@ -318,6 +323,8 @@ class Account(BasePage):
         if nickname:
             user.nickname = nickname
             user.put()
+
+        logging.debug("Nickname: %s", nickname)
 
         #self.response.out.write("nickname: " + user.nickname )
 
@@ -341,7 +348,7 @@ class User(BasePage):
 
         # Creating the data
         description = {"type": "string", "number": "number"}
-        data = ({"type": "Wins", "number": stats.wins}, {"type": "Losses", "number": stats.losses})
+        data = ({"type": "Wins", "number": stats.wins}, {"type": "Losses", "number": stats.losses}, {"type": "Ties", "number": stats.ties})
 
         # Loading it into gviz_api.DataTable
         data_piechart = gviz_api.DataTable(description)
@@ -370,7 +377,7 @@ class Report(BasePage):
 
     def get(self):
         # get all the users
-        userRecords = UserRecord.all().fetch(1000)
+        userRecords = UserRecord.all().order('user').fetch(1000)
         # remove current user from opponent list
         opponents = [user for user in userRecords if user.user != users.get_current_user() ];
 
@@ -399,6 +406,7 @@ class Report(BasePage):
         else:
             game.winner = users.User( self.request.get('opponent') )
             game.loser = users.get_current_user()
+        game.tie = self.request.get('win') == 'tie'
 
         #self.response.out.write( "winner_score: " + str(game.winner) )
 
@@ -418,10 +426,6 @@ class Report(BasePage):
 
         game.put()
 
-        # update ladder with game record
-        ladder = LadderRecord.all().filter("ladder =", ladder_name).get()
-        ladder.UpdateLadder( game )
-
         # Update elo ratings
         # TODO: only recalc newly added game
         RecalcRatingScores()
@@ -434,13 +438,14 @@ application = webapp.WSGIApplication(
                                      [('/', MainPage),
                                       ('/%s' % (ladder_name), Ladder),
                                       ('/%s/' % (ladder_name), Ladder),
+                                      ('/%s/resimulate' % (ladder_name), Resimulate),
                                       ('/%s/report' % (ladder_name), Report),
                                       ('/%s/account' % (ladder_name), Account),
                                       ('/%s/user' % (ladder_name), User)],
                                      debug=True)
 
 def main():
-    #logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger().setLevel(logging.DEBUG)
     run_wsgi_app(application)
 
 if __name__ == "__main__":

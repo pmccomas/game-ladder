@@ -4,5 +4,11 @@
 <form action="/{{ ladder_name }}/account" method="post">
     <label class="create">Email:</label>{{ user.user.email }}</br>
     <label class="create">Nickname:</label><input type="text" name="nickname" value="{{ user.nickname }}"/></br>
-    <div><input type="submit" value="Update"></div>
+    <div><input type="submit" value="Update"/></div>
 </form>
+{% if isAdmin %}
+<h3 id="header">Admin</h3>
+<form action="/{{ ladder_name }}/resimulate" method="post">
+	<input type="submit" value="Resimulate"/>
+</form>
+{% endif %}

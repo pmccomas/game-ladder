@@ -25,23 +25,20 @@ google.setOnLoadCallback(drawVisualization);
 Email:{{ userRecord.user.email }}</br>
 Nickname:{{ userRecord.nickname }}</br>
 <div id="piechart_div_json"></div>
-<h2>Latest Games</h2>
+<h2 id="header">Latest Games</h2>
 <div id="latest_games">
 {% for game in games %}
   <b>{{ game.winner }} {{ game.winner_score }} - {{ game.loser_score }} {{ game.loser }}</b></br>
   date: {{ game.date|date:"F j, Y, P T" }}</br>
-  winner: {{ game.winner }}</br>
+  winner: {% if game.tie %} tie {% else %} {{ game.winner }} {% endif %}</br>
   {% if game.comments %}
-      comments:</br>
-      <div id="game_comments">
+	  comments:
       {% for comment in game.get_comments %}
-         {{ comment.text }}</br>
+         <b>{{ comment.user }}</b> {{ comment.date|timesince}} ago<br>
+         <div id="game_comments">{{ comment.text|escape }}</div>
       {% endfor %}
-      </div>
   {% endif %}
   </br>
 {% endfor %}
-
-
 </div>
 
