@@ -19,3 +19,7 @@ handlers:
 - url: /[A-Za-z0-9]+/.*
   script: game-ladder.py
   login: required
+
+- url: /remote_api
+  script: $PYTHON_LIB/google/appengine/ext/remote_api/handler.py
+  login: admin

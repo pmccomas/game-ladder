@@ -17,6 +17,9 @@ function drawVisualization()
   json_table = new google.visualization.Table(document.getElementById('table_div_json'));
   json_data = new google.visualization.DataTable( {{ json }} );
   //json_data.setProperty(0, 0, "style", "width: 100px;");
+  var formatter = new google.visualization.BarFormat({width: 80, colorPositive: "green" });
+  formatter.format(json_data, 3);
+
   json_table.draw(json_data, options);
 
   google.visualization.events.addListener(json_table, 'select', selectHandler);
@@ -32,9 +35,13 @@ google.setOnLoadCallback(drawVisualization);
 <h2 id="header">Latest Games</h2>
 <div id="latest_games">
 {% for game in games %}
-  <b>{{ game.winner }} {{ game.winner_score }} - {{ game.loser_score }} {{ game.loser }}</b></br>
+  {% if game.winner_team %}
+    <b>{{ game.winner }}</b> ({{ game.winner_team }}) <b>{{ game.winner_score }} - {{ game.loser_score }}</b> ({{ game.loser_team }}) <b>{{ game.loser }}</b></br>
+  {% else %}
+    <b>{{ game.winner }} {{ game.winner_score }} - {{ game.loser_score }} {{ game.loser }}</b></br>
+  {% endif %}
   date: {{ game.date|date:"F j, Y, P T" }}</br>
-  winner: {% if game.tie %} tie {% else %} {{ game.winner }} {% endif %}</br>
+  winner: {% if game.tie %} draw {% else %} {{ game.winner }} {% endif %}</br>
   {% if game.comments %}
       comments:
       {% for comment in game.get_comments %}

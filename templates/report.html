@@ -28,6 +28,9 @@ function checkWholeForm(theForm)
 <h1 id="header">Report Match</h1>
 <form action="/{{ ladder_name }}/report" method="post" onSubmit="return checkWholeForm(this);">
     <label class="create">Player:</label>{{ user.nickname }}</br>
+    <label class="create">Player Result:</label><input type="radio" name="win" value="win"/>Win
+    <input type="radio" name="win" value="loss" checked="checked"/>Loss
+	<input type="radio" name="win" value="draw"/>Draw</br>
     <label for="player_score" class="create">Player Score:</label><input type="text" name="player_score"/></br>
     <label class="create">Opponent:</label>
     <select name="opponent">
@@ -42,9 +45,14 @@ function checkWholeForm(theForm)
         {% endfor %}
     </select></br>
     <label for="opponent_score" class="create">Opponent Score:</label><input type="text" name="opponent_score"/></br>
-    <label class="create">Player Result:</label><input type="radio" name="win" value="win"/>Win
-    <input type="radio" name="win" value="loss" checked="checked"/>Loss
-	<input type="radio" name="win" value="tie"/>Tie<br/>
-	<label class="create">Comment:</label><textarea name="comment" rows="2" style="width: 50%;"></textarea>
+	</br>
+	<label class="create" style="color:darkgrey"><b>Optional Info</b></label></br>
+	{% comment %}
+	<label class="create">Player Side:</label><input type="radio" name="side" value="home" checked="checked"/>Home
+	<input type="radio" name="side" value="away"/>Away</br>
+	{% endcomment %}
+	<label class="create">Player Team Name:</label><input type="text" name="player_team"/></br>
+	<label class="create">Opponent Team Name:</label><input type="text" name="opponent_team"/></br>
+	<label class="create">Comment:</label><textarea name="comment" rows="2" style="width: 50%;"></textarea></br>
     <div><input type="submit" value="Submit"></div>
 </form>

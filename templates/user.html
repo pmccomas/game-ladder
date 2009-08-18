@@ -28,11 +28,15 @@ Nickname:{{ userRecord.nickname }}</br>
 <h2 id="header">Latest Games</h2>
 <div id="latest_games">
 {% for game in games %}
-  <b>{{ game.winner }} {{ game.winner_score }} - {{ game.loser_score }} {{ game.loser }}</b></br>
+  {% if game.winner_team %}
+    <b>{{ game.winner }}</b> ({{ game.winner_team }}) <b>{{ game.winner_score }} - {{ game.loser_score }}</b> ({{ game.loser_team }}) <b>{{ game.loser }}</b></br>
+  {% else %}
+    <b>{{ game.winner }} {{ game.winner_score }} - {{ game.loser_score }} {{ game.loser }}</b></br>
+  {% endif %}
   date: {{ game.date|date:"F j, Y, P T" }}</br>
-  winner: {% if game.tie %} tie {% else %} {{ game.winner }} {% endif %}</br>
+  winner: {% if game.tie %} draw {% else %} {{ game.winner }} {% endif %}</br>
   {% if game.comments %}
-	  comments:
+      comments:
       {% for comment in game.get_comments %}
          <b>{{ comment.user }}</b> {{ comment.date|timesince}} ago<br>
          <div id="game_comments">{{ comment.text|escape }}</div>
@@ -41,4 +45,3 @@ Nickname:{{ userRecord.nickname }}</br>
   </br>
 {% endfor %}
 </div>
-

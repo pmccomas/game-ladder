@@ -10,7 +10,6 @@ from google.appengine.ext import webapp
 from google.appengine.ext.webapp.util import run_wsgi_app
 from google.appengine.ext import db
 
-win_ladder_move_percent = 0.5
 ELO_DEFAULT_RATING = 1500
 ELO_MATCH_WEIGHT = 50.0
 ELO_DIVIDE_FACTOR = 400.0
@@ -47,6 +46,8 @@ class GameRecord(db.Model):
     date = db.DateTimeProperty(auto_now_add=True)
     winner_score = db.IntegerProperty()
     loser_score = db.IntegerProperty()
+    winner_team = db.StringProperty()
+    loser_team = db.StringProperty()
     comments = db.ListProperty(db.Key)
 
     def get_comments(self):
@@ -69,13 +70,13 @@ class UserStats:
     def __init__(self, user):
         winQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", user)
         loseQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", user)
-        winTiesQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", user).filter("tie =", True)
-        loseTiesQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", user).filter("tie =", True)
-        winTies = winTiesQuery.count()
-        loseTies = loseTiesQuery.count()
-        self.wins = winQuery.count() - winTies
-        self.losses = loseQuery.count() - loseTies
-        self.ties = winTies + loseTies
+        winDrawQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", user).filter("tie =", True)
+        loseDrawQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", user).filter("tie =", True)
+        winDraw = winDrawQuery.count()
+        loseDraw = loseDrawQuery.count()
+        self.wins = winQuery.count() - winDraw
+        self.losses = loseQuery.count() - loseDraw
+        self.draws = winDraw + loseDraw
         self.goalsfor = 0
         self.goalsagainst = 0
         for game in winQuery.fetch(1000):
@@ -117,6 +118,27 @@ def CalcRatingChange(playerRating, opponentRating, result, goalDifference):
     #logging.debug("Rating Calc Output: mw:%.2f er:%.2f rc:%.2f", matchWeight, expectedResult, ratingChange)
     return ratingChange
 
+def UpdateRatingScore(game):
+    winner = GetUserRecord( game.winner )
+    loser = GetUserRecord( game.loser )
+
+    if winner.rating == 0:
+        winner.rating = ELO_DEFAULT_RATING
+    if loser.rating == 0:
+        loser.rating = ELO_DEFAULT_RATING
+
+    #logging.debug("Rating Calc: winner:%s loser:%s", game.winner, game.loser)
+    winnerRatingChange = CalcRatingChange(winner.rating, loser.rating, 1.0 if not game.tie else 0.5, game.winner_score - game.loser_score)
+    loserRatingChange = CalcRatingChange(loser.rating, winner.rating, 0.0 if not game.tie else 0.5, game.loser_score - game.winner_score)
+
+    winner.ratingChange = int(winnerRatingChange)
+    winner.rating += winner.ratingChange
+    winner.put()
+
+    loser.ratingChange = int(loserRatingChange)
+    loser.rating += loser.ratingChange
+    loser.put()
+
 # recalculate the rating score for all players from the beginning
 def RecalcRatingScores():
     logging.debug("Recalculating all ratings scores")
@@ -134,25 +156,7 @@ def RecalcRatingScores():
 
     # update rating for each game
     for game in games:
-        winner = GetUserRecord( game.winner );
-        loser = GetUserRecord( game.loser );
-
-        if winner.rating == 0:
-            winner.rating = ELO_DEFAULT_RATING
-        if loser.rating == 0:
-            loser.rating = ELO_DEFAULT_RATING
-
-        #logging.debug("Rating Calc: winner:%s loser:%s", game.winner, game.loser)
-        winnerRatingChange = CalcRatingChange(winner.rating, loser.rating, 1.0 if not game.tie else 0.5, game.winner_score - game.loser_score)
-        loserRatingChange = CalcRatingChange(loser.rating, winner.rating, 0.0 if not game.tie else 0.5, game.loser_score - game.winner_score)
-
-        winner.ratingChange = int(winnerRatingChange)
-        winner.rating += winner.ratingChange
-        winner.put()
-
-        loser.ratingChange = int(loserRatingChange)
-        loser.rating += loser.ratingChange
-        loser.put()
+        UpdateRatingScore( game );
 
 # ------------------- Request Handlers ----------------------------------------------------------------------------------
 class BasePage(webapp.RequestHandler):
@@ -240,10 +244,11 @@ class Ladder(BasePage):
                      "rank": ("number", "Rank"),
                      "wins": ("number", "Wins"),
                      "losses": ("number", "Losses"),
-                     "ties": ("number", "Ties"),
+                     "draws": ("number", "Draws"),
                      "gp": ("number", "Total"),
                      "gf": ("number", "Goals For"),
                      "ga": ("number", "Goals Against"),
+                     "gd": ("number", "Goal Difference"),
                      "rating": ("number", "Rating"),
                      "+-": ("number", "+/-")}
         data = []
@@ -256,10 +261,11 @@ class Ladder(BasePage):
                           "rank": index + 1,
                           "wins": stats.wins,
                           "losses": stats.losses,
-                          "ties": stats.ties,
-                          "gp": stats.wins + stats.losses + stats.ties,
+                          "draws": stats.draws,
+                          "gp": stats.wins + stats.losses + stats.draws,
                           "gf": stats.goalsfor,
                           "ga": stats.goalsagainst,
+                          "gd": stats.goalsfor - stats.goalsagainst,
                           "rating" : userRecord.rating,
                           "+-": userRecord.ratingChange
                           })
@@ -269,11 +275,11 @@ class Ladder(BasePage):
         data_table.LoadData(data)
 
         # Creating a JavaScript code string
-        json = data_table.ToJSon(columns_order=("rank", "rating", "name", "+-", "wins", "losses", "ties", "gp", "gf", "ga"),
+        json = data_table.ToJSon(columns_order=("rank", "rating", "name", "+-", "wins", "draws", "losses", "gp", "gf", "ga", "gd"),
                                    order_by="rank")
 
         gameRecord_query = GameRecord.all().filter("ladder =", ladder_name).order('-date')
-        games = gameRecord_query.fetch(10)
+        games = gameRecord_query.fetch(20)
 
         template_values = {
             'ladder_name' : ladder_name,
@@ -348,7 +354,7 @@ class User(BasePage):
 
         # Creating the data
         description = {"type": "string", "number": "number"}
-        data = ({"type": "Wins", "number": stats.wins}, {"type": "Losses", "number": stats.losses}, {"type": "Ties", "number": stats.ties})
+        data = ({"type": "Wins", "number": stats.wins}, {"type": "Losses", "number": stats.losses}, {"type": "Draws", "number": stats.draws})
 
         # Loading it into gviz_api.DataTable
         data_piechart = gviz_api.DataTable(description)
@@ -403,10 +409,14 @@ class Report(BasePage):
         if self.request.get('win') == 'win':
             game.winner = users.get_current_user()
             game.loser = users.User( self.request.get('opponent') )
+            game.winner_team = self.request.get('player_team')
+            game.loser_team = self.request.get('opponent_team')
         else:
             game.winner = users.User( self.request.get('opponent') )
             game.loser = users.get_current_user()
-        game.tie = self.request.get('win') == 'tie'
+            game.winner_team = self.request.get('opponent_team')
+            game.loser_team = self.request.get('player_teamn')
+        game.tie = self.request.get('win') == 'draw'
 
         #self.response.out.write( "winner_score: " + str(game.winner) )
 
@@ -427,8 +437,7 @@ class Report(BasePage):
         game.put()
 
         # Update elo ratings
-        # TODO: only recalc newly added game
-        RecalcRatingScores()
+        UpdateRatingScore( game );
 
         self.redirect('/%s/' % (ladder_name))
 
