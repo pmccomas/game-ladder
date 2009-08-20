@@ -59,6 +59,11 @@ class UserRecord(db.Model):
     nickname = db.StringProperty()
     rating = db.IntegerProperty()
     ratingChange = db.IntegerProperty()
+    wins = db.IntegerProperty()
+    draws = db.IntegerProperty()
+    losses = db.IntegerProperty()
+    goalsfor = db.IntegerProperty()
+    goalsagainst = db.IntegerProperty()
 
 class LadderRecord(db.Model):
     ladder = db.StringProperty()
@@ -66,25 +71,32 @@ class LadderRecord(db.Model):
 
 # ------------------- Helper classes ----------------------------------------------------------------------------------
 # get player wins/losses by reading game records
-class UserStats:
-    def __init__(self, user):
-        winQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", user)
-        loseQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", user)
-        winDrawQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", user).filter("tie =", True)
-        loseDrawQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", user).filter("tie =", True)
+def UpdateUserStats(userRecord):
+        winQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", userRecord.user)
+        loseQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", userRecord.user)
+        winDrawQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", userRecord.user).filter("tie =", True)
+        loseDrawQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", userRecord.user).filter("tie =", True)
         winDraw = winDrawQuery.count()
         loseDraw = loseDrawQuery.count()
-        self.wins = winQuery.count() - winDraw
-        self.losses = loseQuery.count() - loseDraw
-        self.draws = winDraw + loseDraw
-        self.goalsfor = 0
-        self.goalsagainst = 0
+        userRecord.wins = winQuery.count() - winDraw
+        userRecord.losses = loseQuery.count() - loseDraw
+        userRecord.draws = winDraw + loseDraw
+        userRecord.goalsfor = 0
+        userRecord.goalsagainst = 0
         for game in winQuery.fetch(1000):
-            self.goalsfor += game.winner_score
-            self.goalsagainst += game.loser_score
+            userRecord.goalsfor += game.winner_score
+            userRecord.goalsagainst += game.loser_score
         for game in loseQuery.fetch(1000):
-            self.goalsfor += game.loser_score
-            self.goalsagainst += game.winner_score
+            userRecord.goalsfor += game.loser_score
+            userRecord.goalsagainst += game.winner_score
+        userRecord.put()
+
+def RecalcUserStats():
+    userRecord_query = UserRecord.all().filter("ladder =", ladder_name)
+    userRecords = userRecord_query.fetch(1000)
+
+    for userRecord in userRecords:
+        UpdateUserStats(userRecord)
 
 # ------------------- Elo Rating Functions ---------------------------------------------------------------------------
 # based on formula taken from World Football Elo Rating System at eloratings.net
@@ -235,9 +247,11 @@ class Ladder(BasePage):
         self.CreateLadder()
 
         #RecalcRatingScores()
+        #RecalcUserStats()
 
         # get all the users
         userRecords = UserRecord.all().filter("ladder =", ladder_name).order('-rating').fetch(1000)
+
 
         # Creating the data
         description = {"name": ("string", "Name"),
@@ -253,22 +267,23 @@ class Ladder(BasePage):
                      "+-": ("number", "+/-")}
         data = []
 
+
         for index, userRecord in enumerate(userRecords):
             user = userRecord.user
-            stats = UserStats(user)
             name = user.email() if not userRecord.nickname else "%s (%s)" % (userRecord.nickname, user.email())
             data.append({"name": (user.email(), name),
                           "rank": index + 1,
-                          "wins": stats.wins,
-                          "losses": stats.losses,
-                          "draws": stats.draws,
-                          "gp": stats.wins + stats.losses + stats.draws,
-                          "gf": stats.goalsfor,
-                          "ga": stats.goalsagainst,
-                          "gd": stats.goalsfor - stats.goalsagainst,
+                          "wins": userRecord.wins,
+                          "losses": userRecord.losses,
+                          "draws": userRecord.draws,
+                          "gp": userRecord.wins + userRecord.losses + userRecord.draws,
+                          "gf": userRecord.goalsfor,
+                          "ga": userRecord.goalsagainst,
+                          "gd": userRecord.goalsfor - userRecord.goalsagainst,
                           "rating" : userRecord.rating,
                           "+-": userRecord.ratingChange
                           })
+
 
         # Loading it into gviz_api.DataTable
         data_table = gviz_api.DataTable(description)
@@ -277,6 +292,7 @@ class Ladder(BasePage):
         # Creating a JavaScript code string
         json = data_table.ToJSon(columns_order=("rank", "rating", "name", "+-", "wins", "draws", "losses", "gp", "gf", "ga", "gd"),
                                    order_by="rank")
+
 
         gameRecord_query = GameRecord.all().filter("ladder =", ladder_name).order('-date')
         games = gameRecord_query.fetch(20)
@@ -299,6 +315,7 @@ class Ladder(BasePage):
 class Resimulate(BasePage):
     def post(self):
         RecalcRatingScores()
+        RecalcUserStats()
 
         self.redirect('/%s/' % (ladder_name))
 
@@ -343,7 +360,6 @@ class User(BasePage):
 
         user = users.User( self.request.get('id') )
         userRecord = GetUserRecord( user )
-        stats = UserStats(user)
 
         gameRecord_query = GameRecord.all().filter("ladder =", ladder_name).filter('winner = ', user)
         games = gameRecord_query.fetch(1000)
@@ -354,7 +370,7 @@ class User(BasePage):
 
         # Creating the data
         description = {"type": "string", "number": "number"}
-        data = ({"type": "Wins", "number": stats.wins}, {"type": "Losses", "number": stats.losses}, {"type": "Draws", "number": stats.draws})
+        data = ({"type": "Wins", "number": userRecord.wins}, {"type": "Losses", "number": userRecord.losses}, {"type": "Draws", "number": userRecord.draws})
 
         # Loading it into gviz_api.DataTable
         data_piechart = gviz_api.DataTable(description)
@@ -438,6 +454,9 @@ class Report(BasePage):
 
         # Update elo ratings
         UpdateRatingScore( game );
+        # update user win/lose stats
+        # TODO: update only user stats that changed
+        RecalcUserStats()
 
         self.redirect('/%s/' % (ladder_name))
 
@@ -453,9 +472,26 @@ application = webapp.WSGIApplication(
                                       ('/%s/user' % (ladder_name), User)],
                                      debug=True)
 
-def main():
+def real_main():
     logging.getLogger().setLevel(logging.DEBUG)
     run_wsgi_app(application)
+
+def profile_main():
+    # This is the main function for profiling
+    # We've renamed our original main() above to real_main()
+    import cProfile, pstats
+    prof = cProfile.Profile()
+    prof = prof.runctx("real_main()", globals(), locals())
+    print "<pre>"
+    stats = pstats.Stats(prof)
+    stats.sort_stats("time")  # Or cumulative
+    stats.print_stats(80)  # 80 = how many to print
+    # The rest is optional.
+    # stats.print_callees()
+    # stats.print_callers()
+    print "</pre>"
+
+main = real_main
 
 if __name__ == "__main__":
   main()
