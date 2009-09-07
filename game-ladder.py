@@ -3,6 +3,7 @@ import os
 import gviz_api
 import math
 import logging
+import time
 
 from google.appengine.ext.webapp import template
 from google.appengine.api import users
@@ -13,6 +14,8 @@ from google.appengine.ext import db
 ELO_DEFAULT_RATING = 1500
 ELO_MATCH_WEIGHT = 50.0
 ELO_DIVIDE_FACTOR = 400.0
+PROVISIONAL_PROTECTION = 2.0
+PROVISIONAL_NUM_GAMES = 6
 
 ladder_name = "fifadev"
 
@@ -64,39 +67,16 @@ class UserRecord(db.Model):
     losses = db.IntegerProperty()
     goalsfor = db.IntegerProperty()
     goalsagainst = db.IntegerProperty()
+    isProvisional = db.BooleanProperty()
+
+    @staticmethod
+    def create_UserRecord():
+        return UserRecord(rating = 0, ratingChange = 0, wins = 0, draws = 0, losses = 0, goalsfor = 0, goalsagainst = 0, isProvisional = True)
+
 
 class LadderRecord(db.Model):
     ladder = db.StringProperty()
     date = db.DateTimeProperty(auto_now_add=True)
-
-# ------------------- Helper classes ----------------------------------------------------------------------------------
-# get player wins/losses by reading game records
-def UpdateUserStats(userRecord):
-        winQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", userRecord.user)
-        loseQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", userRecord.user)
-        winDrawQuery = GameRecord.all().filter("ladder =", ladder_name).filter("winner =", userRecord.user).filter("tie =", True)
-        loseDrawQuery = GameRecord.all().filter("ladder =", ladder_name).filter("loser =", userRecord.user).filter("tie =", True)
-        winDraw = winDrawQuery.count()
-        loseDraw = loseDrawQuery.count()
-        userRecord.wins = winQuery.count() - winDraw
-        userRecord.losses = loseQuery.count() - loseDraw
-        userRecord.draws = winDraw + loseDraw
-        userRecord.goalsfor = 0
-        userRecord.goalsagainst = 0
-        for game in winQuery.fetch(1000):
-            userRecord.goalsfor += game.winner_score
-            userRecord.goalsagainst += game.loser_score
-        for game in loseQuery.fetch(1000):
-            userRecord.goalsfor += game.loser_score
-            userRecord.goalsagainst += game.winner_score
-        userRecord.put()
-
-def RecalcUserStats():
-    userRecord_query = UserRecord.all().filter("ladder =", ladder_name)
-    userRecords = userRecord_query.fetch(1000)
-
-    for userRecord in userRecords:
-        UpdateUserStats(userRecord)
 
 # ------------------- Elo Rating Functions ---------------------------------------------------------------------------
 # based on formula taken from World Football Elo Rating System at eloratings.net
@@ -121,11 +101,17 @@ def CalcMatchWeight(goalDifference):
         weight *= 1.5
     return weight
 
-def CalcRatingChange(playerRating, opponentRating, result, goalDifference):
+def CalcRatingChange(playerRating, opponentRating, result, goalDifference, isProtected):
+
+    protection = 1.0
+    if( isProtected ):
+        protection = PROVISIONAL_PROTECTION
+
     matchWeight = CalcMatchWeight(goalDifference)
     expectedResult = CalcExpectedResult(playerRating, opponentRating)
     resultDiff = result - expectedResult
-    ratingChange = resultDiff * matchWeight
+    ratingChange = (resultDiff * matchWeight) / protection
+
     #logging.debug("Rating Calc Input: pr:%d or:%d result:%.2f, gd:%d", playerRating, opponentRating, result, goalDifference)
     #logging.debug("Rating Calc Output: mw:%.2f er:%.2f rc:%.2f", matchWeight, expectedResult, ratingChange)
     return ratingChange
@@ -134,21 +120,44 @@ def UpdateRatingScore(game):
     winner = GetUserRecord( game.winner )
     loser = GetUserRecord( game.loser )
 
+    if winner.isProvisional and not loser.isProvisional:
+        winnerProtection = False
+        loserProtection = True
+    else:
+        winnerProtection = False
+        loserProtection = False
+
     if winner.rating == 0:
         winner.rating = ELO_DEFAULT_RATING
     if loser.rating == 0:
         loser.rating = ELO_DEFAULT_RATING
 
     #logging.debug("Rating Calc: winner:%s loser:%s", game.winner, game.loser)
-    winnerRatingChange = CalcRatingChange(winner.rating, loser.rating, 1.0 if not game.tie else 0.5, game.winner_score - game.loser_score)
-    loserRatingChange = CalcRatingChange(loser.rating, winner.rating, 0.0 if not game.tie else 0.5, game.loser_score - game.winner_score)
+    winnerRatingChange = CalcRatingChange(winner.rating, loser.rating, 1.0 if not game.tie else 0.5, game.winner_score - game.loser_score, winnerProtection)
+    loserRatingChange = CalcRatingChange(loser.rating, winner.rating, 0.0 if not game.tie else 0.5, game.loser_score - game.winner_score, loserProtection)
 
     winner.ratingChange = int(winnerRatingChange)
     winner.rating += winner.ratingChange
+    winner.goalsfor += game.winner_score
+    winner.goalsagainst += game.loser_score
+    if( game.tie ):
+        winner.draws += 1
+    else:
+        winner.wins += 1
+    numWinnerGames = winner.wins + winner.draws + winner.losses
+    winner.isProvisional = True if numWinnerGames < PROVISIONAL_NUM_GAMES else False
     winner.put()
 
     loser.ratingChange = int(loserRatingChange)
     loser.rating += loser.ratingChange
+    loser.goalsfor += game.loser_score
+    loser.goalsagainst += game.winner_score
+    if( game.tie ):
+        loser.draws += 1
+    else:
+        loser.losses += 1
+    numLoserGames = loser.wins + loser.draws + loser.losses
+    loser.isProvisional = True if numLoserGames < PROVISIONAL_NUM_GAMES else False
     loser.put()
 
 # recalculate the rating score for all players from the beginning
@@ -164,6 +173,12 @@ def RecalcRatingScores():
     userRecords = userRecord_query.fetch(1000)
     for userRecord in userRecords:
         userRecord.rating = 0
+        userRecord.wins = 0
+        userRecord.draws = 0
+        userRecord.losses = 0
+        userRecord.goalsfor = 0
+        userRecord.goalsagainst = 0
+        userRecord.isProvisional = True
         userRecord.put()
 
     # update rating for each game
@@ -222,7 +237,7 @@ class Ladder(BasePage):
         if userRecord_query.count() > 0:
             return
 
-        userRecord = UserRecord()
+        userRecord = UserRecord.create_UserRecord()
         userRecord.user = users.get_current_user()
         userRecord.ladder = ladder_name
         userRecord.put()
@@ -251,7 +266,6 @@ class Ladder(BasePage):
 
         # get all the users
         userRecords = UserRecord.all().filter("ladder =", ladder_name).order('-rating').fetch(1000)
-
 
         # Creating the data
         description = {"name": ("string", "Name"),
@@ -313,12 +327,36 @@ class Ladder(BasePage):
         self.write_page_footer()
 
 class Resimulate(BasePage):
-    def post(self):
-        RecalcRatingScores()
-        RecalcUserStats()
+    title = 'Resimulate'
 
-        self.redirect('/%s/' % (ladder_name))
+    def outputPage(self, step):
+        template_values = {
+            'step': step
+        }
+        self.write_page_header()
+        path = os.path.join(os.path.dirname(__file__), 'templates/resimulate.html')
+        self.response.out.write(template.render(path, template_values))
+        self.write_page_footer()
 
+    def get(self):
+        try:
+            step = self.request.get("step")
+            if( step == None or step == "" ):
+                raise ValueError
+            logging.debug("resimulating step: " + step)
+
+            self.outputPage(step)
+            if( step == "rating" ):
+                RecalcRatingScores()
+                self.redirect('/%s/resimulate?step=' % (ladder_name) + "stats")
+            elif( step == "stats" ):
+                #RecalcUserStats()
+                self.redirect('/%s/' % (ladder_name))
+
+        except ValueError:
+            self.outputPage("rating" + step)
+            self.redirect('/%s/resimulate?step=' % (ladder_name) + "rating")
+            return
 
 class Account(BasePage):
     title = 'My Account'
@@ -454,9 +492,6 @@ class Report(BasePage):
 
         # Update elo ratings
         UpdateRatingScore( game );
-        # update user win/lose stats
-        # TODO: update only user stats that changed
-        RecalcUserStats()
 
         self.redirect('/%s/' % (ladder_name))
 

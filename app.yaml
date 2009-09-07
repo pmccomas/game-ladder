@@ -7,6 +7,10 @@ handlers:
 - url: /stylesheets
   static_dir: stylesheets
 
+- url: /favicon.ico
+  static_files: static/favicon.ico
+  upload: static/favicon.ico
+
 - url: /
   script: game-ladder.py
 
@@ -15,6 +19,10 @@ handlers:
 
 - url: /[A-Za-z0-9]+/user
   script: game-ladder.py
+
+- url: /[A-Za-z0-9]+/resimulate
+  script: game-ladder.py
+  login: admin
 
 - url: /[A-Za-z0-9]+/.*
   script: game-ladder.py
